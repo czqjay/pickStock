@@ -67,7 +67,6 @@ public class PickFinanceUP {
     public PickFinanceUP() {
 
 
-
         InputStream in = this.getClass().getResourceAsStream("/all_stock.txt");
         BufferedReader br = new BufferedReader(new java.io.InputStreamReader(in));
         while (true) {
@@ -118,31 +117,30 @@ public class PickFinanceUP {
 //            if (calcPramising(this.getRemoteDataByUtil(this.headersOfFinance, url, "POST"))) {
 
 
-
-            if (calcPramising( JdkHttpUtils
+            String result = JdkHttpUtils
                     .getGzip(url, 60000, 60000, "application/json",
-                            this.getHeaderAsMap(this.headersOfFinance), null, "POST"))){
-
+                            this.getHeaderAsMap(this.headersOfFinance), null, "POST");
+            if (calcPramising(result)) {
 
                 url = this.urlOfDayli;
                 url = url.replace("{stockID}", stockID);
                 url = url.replace("{timeStamp}", mill.substring(0, mill.length() - 3));
                 Map m = this.getHeaderAsMap(this.headersOfDayli);
 
+                if (calcPramisingByStockLoan(result))
+                    if (calcPramisingByPrice(JdkHttpUtils
+                            .getGet(url, 60000, 60000, "application/json", m, null))) {
 
-                if(calcPramisingByPrice(JdkHttpUtils
-                        .getGet(url, 60000, 60000, "application/json", m, null))){
-
-                    RandomAccessFile ra = new RandomAccessFile(filestr, "rws");
-                    ra.seek(ra.length());
-                    ra.write("\r\n".getBytes());
-                    ra.write(stockID.getBytes());
-                    ra.close();
-                }
+                        RandomAccessFile ra = new RandomAccessFile(filestr, "rws");
+                        ra.seek(ra.length());
+                        ra.write("\r\n".getBytes());
+                        ra.write(stockID.getBytes());
+                        ra.close();
+                    }
             }
 
             Random r = new Random();
-            Thread.sleep(r.nextInt(10) * 1000);
+            Thread.sleep(r.nextInt(5) * 1000);
         }
     }
 
@@ -167,6 +165,7 @@ public class PickFinanceUP {
     }
 
 
+    // 收盘价不超过历史最低价格的 130%
     public boolean calcPramisingByPrice(String result) throws IOException {
         ObjectMapper om = new ObjectMapper();
         Map map = om.readValue(result, Map.class);
@@ -179,13 +178,43 @@ public class PickFinanceUP {
             close = Float.valueOf(list.get(i).get(2).toString());
             minClose = minClose == 0 ? close : minClose > close ? close : minClose;
         }
-        System.out.print( close * 0.7  );
+        System.out.print(close * 0.7);
         System.out.print("  <  ");
-        System.out.println( minClose);
-       return close * 0.7 < minClose;
+        System.out.println(minClose);
+        return close * 0.7 < minClose;
 
     }
 
+
+    // 当日融券余额  * 2  < 昨日融券余量
+    public boolean calcPramisingByStockLoan(String result) throws IOException {
+        String stockID = null;
+        List<Double> financeBuket = new ArrayList<Double>();
+
+        ObjectMapper om = new ObjectMapper();
+        Map map = om.readValue(result, Map.class);
+
+        List re = (List) map.get("records");
+        Map re2;
+
+
+        for (int i = 0; i < 2; i++) {
+
+            re2 = (Map) re.get(i);
+            stockID = (String) re2.get("SECCODE");
+            Double dailyStockLoan = (Double) re2.get("F008N");
+            financeBuket.add(dailyStockLoan);
+        }
+
+        Double currentStockLaon = financeBuket.get(0);
+        Double yestodayStockLaon = financeBuket.get(1);
+
+        return currentStockLaon * 2 < yestodayStockLaon;
+
+
+    }
+
+    //融资买入策略
     public boolean calcPramising(String result) throws IOException {
 
         String stockID = null;
@@ -206,12 +235,13 @@ public class PickFinanceUP {
             financeBuyBuket.add(dailyBuyFinance);
         }
 
-        if (isPromising(financeBuyBuket)) {
+        if (isPromising2(financeBuyBuket)) {
             return true;
         }
         return false;
     }
 
+    // 当日融资买入 大于前4天的平均值*  threshold（ =2）
     public static boolean isPromising(List<Double> financeBuyBuket) {
         int threshold = 2;
         Double today = financeBuyBuket.get(0);
@@ -227,6 +257,19 @@ public class PickFinanceUP {
 
     }
 
+
+    // dailyFinanceBuy > yestoday
+    public static boolean isPromising2(List<Double> financeBuyBuket) {
+        int threshold = 2;
+        Double today = financeBuyBuket.get(0);
+        Double yestoday = financeBuyBuket.get(1);
+
+        System.out.println("today = " + today);
+        System.out.println("yestoday = " + yestoday);
+        System.out.println(today > yestoday);
+        return today > yestoday;
+
+    }
 
 
     public HttpResponse getRemoteData() {
@@ -423,12 +466,8 @@ public class PickFinanceUP {
 //        System.out.println("result = " + result);
 
 
-
-
         String url = p.urlOfFinance + "000001";
-        String result = p.getRemoteDataByUtil( p.headersOfFinance , url,"POST");
-
-
+        String result = p.getRemoteDataByUtil(p.headersOfFinance, url, "POST");
 
 
         System.out.println("result = " + result);
@@ -467,8 +506,6 @@ public class PickFinanceUP {
         return output;
 
     }
-
-
 
 
     public void calcMHXY() {
