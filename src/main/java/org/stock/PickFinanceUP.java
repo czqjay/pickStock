@@ -27,6 +27,9 @@ public class PickFinanceUP {
 
     public List stockList = new LinkedList();
 
+
+    String basedir = "D:\\github\\pickStock\\src\\main\\resources\\";
+
     String mcode = "MTY3NzY4MTI3Ng==";
     public String headersOfFinance = "";
 
@@ -86,188 +89,215 @@ public class PickFinanceUP {
 
 
     @GetMapping("test")
-    public void getUpList() {
+    public String getUpList() throws Exception {
 
-        System.out.println("stockList.get(0) = " + stockList.get(0));
+        PickFinanceUP p = this;
+        String mill = String.valueOf(new Date().getTime());
+        p.mcode = p.generateMcode(mill.substring(0, mill.length() - 3));
+        p.refershMcode();
 
+        String url = p.urlOfFinance + "000001";
+        List re = null;
+        Map re2;
+        String result = null;
+        try {
+            result = JdkHttpUtils
+                    .getGzip(url, 60000, 60000, "application/json",
+                            p.getHeaderAsMap(p.headersOfFinance), null, "POST");
+
+//        TRADEDATE
+            ObjectMapper om = new ObjectMapper();
+            Map map = om.readValue(result, Map.class);
+            re = (List) map.get("records");
+
+
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            SimpleDateFormat sdf2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            Calendar ca = Calendar.getInstance();
+            ca.add(Calendar.DAY_OF_MONTH, -1);
+            String dateOfNewer = sdf.format(ca.getTime());
+
+            dateOfNewer = "2023-03-03";
+
+            re2 = (Map) re.get(0);
+            String dateOfNewerData = (String) re2.get("TRADEDATE");
+
+            System.out.println("dateOfNewer = " + dateOfNewer);
+            System.out.println("dateOfNewerData = " + dateOfNewerData);
+
+            System.out.println("sdf2.format(new Date()) = " + sdf2.format(new Date()));
+
+            if (dateOfNewer.equals(dateOfNewerData)) {
+
+                String dateTimeStr = sdf2.format(new Date());
+                System.out.println("dateTimeStr = " + dateTimeStr);
+                System.out.println(result);
+
+                String file = p.basedir + "flush.txt";
+                p.record2File(file, dateTimeStr);
+                return "T";
+
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("e.getMessage() = " + e.getMessage());
+
+        }
+
+        return "F";
+
+    }
+
+    @GetMapping("cacheStockHis")
+    public String cacheStockHis() throws Exception {
+
+        String stockID = "";
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        String dateStr = sdf.format(new Date());
+        String dirstr = "E:\\ideaWorkSpace\\pickStock\\src\\main\\resources\\cache\\" + dateStr;
+        new File(dirstr).mkdirs();
+        for (int i = 0; i < stockList.size(); i++) {
+
+
+            try {
+
+                String mill = String.valueOf(new Date().getTime());
+                this.mcode = this.generateMcode(mill.substring(0, mill.length() - 3));
+                refershMcode();
+                stockID = (String) stockList.get(i);
+                String url = this.urlOfFinance + stockID;
+                String filestr = dirstr + "\\" + stockID + ".txt";
+                if (new File(filestr).exists()) {
+                    continue;
+                }
+                String result = JdkHttpUtils
+                        .getGzip(url, 60000, 60000, "application/json",
+                                this.getHeaderAsMap(this.headersOfFinance), null, "POST");
+                RandomAccessFile ra = new RandomAccessFile(filestr, "rws");
+                ra.write(result.getBytes());
+                ra.close();
+
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                i--;
+                Random r = new Random();
+                try {
+                    Thread.sleep(r.nextInt(5) * 1000);
+                } catch (InterruptedException ex) {
+                    throw new RuntimeException(ex);
+                }
+            }
+
+
+            Random r = new Random();
+            Thread.sleep((long) (r.nextDouble() * 1000));
+        }
+
+        System.out.println("caching  complete");
+        return "caching  complete";
 
     }
 
     @GetMapping("analysisData")
-    public void analysisData() throws Exception {
+    public String analysisData() throws Exception {
 
 //        this.parseByTostring(this.getRemoteData());
 
-
+        ;
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
         String dateStr = sdf.format(new Date());
-        String filestr = "E:\\ideaWorkSpace\\pickStock\\src\\main\\resources\\" + dateStr + ".txt";
+        String filestr = basedir + dateStr + ".txt";
 
 
         String stockID = "";
-        String stockIDOfPramising;
         for (int i = 0; i < stockList.size(); i++) {
+
 
             String mill = String.valueOf(new Date().getTime());
             this.mcode = this.generateMcode(mill.substring(0, mill.length() - 3));
             refershMcode();
             stockID = (String) stockList.get(i);
             String url = this.urlOfFinance + stockID;
-
+            Map m = this.getHeaderAsMap(this.headersOfDayli);
 //            if (calcPramising(this.getRemoteDataByUtil(this.headersOfFinance, url, "POST"))) {
 
 
-            String result = JdkHttpUtils
-                    .getGzip(url, 60000, 60000, "application/json",
-                            this.getHeaderAsMap(this.headersOfFinance), null, "POST");
-            if (calcPramising(result)) {
+            String result = getFinanceWithCache(stockID, url);
 
+            if (Tractic.isPromising3(result)) {
                 url = this.urlOfDayli;
                 url = url.replace("{stockID}", stockID);
                 url = url.replace("{timeStamp}", mill.substring(0, mill.length() - 3));
-                Map m = this.getHeaderAsMap(this.headersOfDayli);
-
-                if (calcPramisingByStockLoan(result))
-                    if (calcPramisingByPrice(JdkHttpUtils
-                            .getGet(url, 60000, 60000, "application/json", m, null))) {
-
-                        RandomAccessFile ra = new RandomAccessFile(filestr, "rws");
-                        ra.seek(ra.length());
-                        ra.write("\r\n".getBytes());
-                        ra.write(stockID.getBytes());
-                        ra.close();
-                    }
+                if (Tractic.calcPramisingByPrice(JdkHttpUtils
+                        .getGet(url, 60000, 60000, "application/json", m, null), 1.2)) {
+                    String calcPramisingByStockLoanFile = basedir + dateStr + "StockLoanBecomeHalf.txt";
+                    record2File(calcPramisingByStockLoanFile, stockID);
+                }
             }
 
-            Random r = new Random();
-            Thread.sleep(r.nextInt(5) * 1000);
+
+            if (Tractic.isPromising2(result)) {
+//            if (isPromising2(result)) {
+                url = this.urlOfDayli;
+                url = url.replace("{stockID}", stockID);
+                url = url.replace("{timeStamp}", mill.substring(0, mill.length() - 3));
+
+
+                if (Tractic.calcPramisingByPrice(JdkHttpUtils
+                        .getGet(url, 60000, 60000, "application/json", m, null),1.2)) {
+
+                    record2File(filestr, stockID);
+                }
+            }
+
         }
+
+
+        System.out.println("analysisData complete");
+        return "analysisData complete";
+    }
+
+    public void record2File(String filestr, String stockID) throws Exception {
+
+        RandomAccessFile ra = new RandomAccessFile(filestr, "rws");
+        ra.seek(ra.length());
+        ra.write("\r\n".getBytes());
+        ra.write(stockID.getBytes());
+        ra.close();
+
     }
 
 
-    public String getRemoteDataByUtil(String headers, String url, String method) throws Exception {
+    public String getFinanceWithCache(String stockID, String url) throws Exception {
 //        @limit=10
 
-        System.out.println("url = " + url);
-        String result = "";
-        Map m = this.getHeaderAsMap(headers);
-        try {
-            PickFinanceUP that = this;
-            result = JdkHttpUtils
-                    .getGzip(url, 60000, 60000, "application/json", m, null, method);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        String dateStr = sdf.format(new Date());
+        String dirstr = "E:\\ideaWorkSpace\\pickStock\\src\\main\\resources\\cache\\" + dateStr;
 
-        System.out.println("result = " + result);
+        StringBuffer sb = new StringBuffer();
+        String result = "";
+        File f = new File(dirstr + "\\" + stockID + ".txt");
+        if (f.exists()) {
+            RandomAccessFile ra = new RandomAccessFile(f, "rws");
+
+            String s;
+            while ((s = ra.readLine()) != null) {
+                sb.append(s);
+//                System.out.println("s = " + new String(s.getBytes("iso-8859-1"),"utf-8"));
+            }
+
+            ra.close();
+            return sb.toString();
+        }
+        result = JdkHttpUtils
+                .getGzip(url, 60000, 60000, "application/json",
+                        this.getHeaderAsMap(this.headersOfFinance), null, "POST");
 
         return result;
-    }
 
-
-    // 收盘价不超过历史最低价格的 130%
-    public boolean calcPramisingByPrice(String result) throws IOException {
-        ObjectMapper om = new ObjectMapper();
-        Map map = om.readValue(result, Map.class);
-
-        List<ArrayList> list = (List) map.get("line");
-
-        float minClose = 0;
-        float close = 0;
-        for (int i = 0; i < list.size(); i++) {
-            close = Float.valueOf(list.get(i).get(2).toString());
-            minClose = minClose == 0 ? close : minClose > close ? close : minClose;
-        }
-        System.out.print(close * 0.7);
-        System.out.print("  <  ");
-        System.out.println(minClose);
-        return close * 0.7 < minClose;
-
-    }
-
-
-    // 当日融券余额  * 2  < 昨日融券余量
-    public boolean calcPramisingByStockLoan(String result) throws IOException {
-        String stockID = null;
-        List<Double> financeBuket = new ArrayList<Double>();
-
-        ObjectMapper om = new ObjectMapper();
-        Map map = om.readValue(result, Map.class);
-
-        List re = (List) map.get("records");
-        Map re2;
-
-
-        for (int i = 0; i < 2; i++) {
-
-            re2 = (Map) re.get(i);
-            stockID = (String) re2.get("SECCODE");
-            Double dailyStockLoan = (Double) re2.get("F008N");
-            financeBuket.add(dailyStockLoan);
-        }
-
-        Double currentStockLaon = financeBuket.get(0);
-        Double yestodayStockLaon = financeBuket.get(1);
-
-        return currentStockLaon * 2 < yestodayStockLaon;
-
-
-    }
-
-    //融资买入策略
-    public boolean calcPramising(String result) throws IOException {
-
-        String stockID = null;
-        List<Double> financeBuyBuket = new ArrayList<Double>();
-
-        ObjectMapper om = new ObjectMapper();
-        Map map = om.readValue(result, Map.class);
-
-        List re = (List) map.get("records");
-        Map re2;
-
-
-        for (int i = 0; i < 5; i++) {
-
-            re2 = (Map) re.get(i);
-            stockID = (String) re2.get("SECCODE");
-            Double dailyBuyFinance = (Double) re2.get("F002N");
-            financeBuyBuket.add(dailyBuyFinance);
-        }
-
-        if (isPromising2(financeBuyBuket)) {
-            return true;
-        }
-        return false;
-    }
-
-    // 当日融资买入 大于前4天的平均值*  threshold（ =2）
-    public static boolean isPromising(List<Double> financeBuyBuket) {
-        int threshold = 2;
-        Double today = financeBuyBuket.get(0);
-        Double avgAllofAgo = 0D;
-        for (int i = 0; i < financeBuyBuket.size() - 1; i++) {
-            avgAllofAgo = avgAllofAgo + financeBuyBuket.get(i);
-        }
-        avgAllofAgo = avgAllofAgo / (financeBuyBuket.size() - 1);
-        System.out.println("today = " + today);
-        System.out.println("avgAllofAgo = " + avgAllofAgo);
-        System.out.println(today > avgAllofAgo * threshold);
-        return today > avgAllofAgo * threshold;
-
-    }
-
-
-    // dailyFinanceBuy > yestoday
-    public static boolean isPromising2(List<Double> financeBuyBuket) {
-        int threshold = 2;
-        Double today = financeBuyBuket.get(0);
-        Double yestoday = financeBuyBuket.get(1);
-
-        System.out.println("today = " + today);
-        System.out.println("yestoday = " + yestoday);
-        System.out.println(today > yestoday);
-        return today > yestoday;
 
     }
 
@@ -422,17 +452,21 @@ public class PickFinanceUP {
 
     }
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
 
+
+
+
+          
         PickFinanceUP p = new PickFinanceUP();
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
-        String dateStr = sdf.format(new Date());
-
-
-        String mill = String.valueOf(new Date().getTime());
-        p.mcode = p.generateMcode(mill.substring(0, mill.length() - 3));
-        p.refershMcode();
-
+//        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+//        String dateStr = sdf.format(new Date());
+//
+//
+//        String mill = String.valueOf(new Date().getTime());
+//        p.mcode = p.generateMcode(mill.substring(0, mill.length() - 3));
+//        p.refershMcode();
+//
 //        String url = p.urlOfDayli;
 //        url = url.replace("{stockID}", "300020");
 //        url = url.replace("{timeStamp}", mill.substring(0, mill.length() - 3));
@@ -466,11 +500,44 @@ public class PickFinanceUP {
 //        System.out.println("result = " + result);
 
 
-        String url = p.urlOfFinance + "000001";
-        String result = p.getRemoteDataByUtil(p.headersOfFinance, url, "POST");
+//        String url = p.urlOfFinance + "000001";
+//        String result = p.getRemoteDataByUtil(p.headersOfFinance, url, "POST");
+
+//        System.out.println("result = " + result);
+
+//        url = p.urlOfFinance + "000001";
+//        p.getFinanceWithCache("000001",url);
 
 
-        System.out.println("result = " + result);
+//        while (true) {
+//            String re = "";
+//            try {
+//                re = JdkHttpUtils.getGet("http://localhost:8080/test", 60000, 60000, "", null, null);
+//            } catch (IOException e) {
+//                e.printStackTrace();
+//            }
+//            System.out.println("re = " + re);
+//
+//            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+//            String dateTimeStr = sdf.format(new Date());
+//
+//            if (re.equals("T")) {
+//                System.out.println("dateTimeStr = " + dateTimeStr);
+//                return;
+//            }
+//
+//
+//            Random r = new Random();
+//            try {
+//                Thread.sleep(r.nextInt(30) * 1000);
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
+//
+//
+//        }
+
+
     }
 
     public String generateMcode(String input) {
